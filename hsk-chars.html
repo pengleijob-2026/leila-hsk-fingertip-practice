@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>汉字绽放 · HSK1 指尖认字</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #0a0a0f;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Songti SC", serif;
+      color: #fff;
+    }
+    #stage {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      background: #0a0a0f;
+    }
+    #video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      filter: brightness(0.7) contrast(1.05);
+      z-index: 0;
+    }
+    #canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      pointer-events: none;
+    }
+    #hint {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 2;
+      padding: 10px 16px;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 215, 120, 0.35);
+      border-radius: 12px;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+      backdrop-filter: blur(8px);
+      pointer-events: none;
+      transition: opacity 0.4s;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    #nav {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 2;
+      font-size: 13px;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    #nav a {
+      color: #ffd78a;
+      text-decoration: none;
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 215, 120, 0.3);
+    }
+    #status {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2;
+      padding: 8px 14px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 999px;
+      font-size: 13px;
+      opacity: 0.9;
+      pointer-events: none;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      white-space: nowrap;
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8, 8, 16, 0.88);
+      padding: 24px;
+      text-align: center;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    #overlay.hidden { display: none; }
+    #overlay .card {
+      max-width: 420px;
+      padding: 28px 24px;
+      background: rgba(30, 24, 16, 0.92);
+      border: 1px solid rgba(255, 215, 120, 0.3);
+      border-radius: 16px;
+      line-height: 1.7;
+    }
+    #overlay h2 { font-size: 20px; margin-bottom: 12px; color: #ffd78a; }
+    #overlay p { font-size: 14px; color: #ddd; margin-bottom: 8px; }
+    #overlay .small { font-size: 12px; color: #999; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="hint">📖 张开手指，让汉字绽放（花 / 爱 / 你 / 好 / 学）</div>
+    <div id="nav" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+      <a href="./index.html">首页</a>
+      <a href="./flower.html">指尖开花</a>
+      <a href="./hsk-stroke.html">笔顺描红</a>
+    </div>
+    <div id="status">正在初始化…</div>
+    <div id="overlay">
+      <div class="card">
+        <h2 id="overlay-title">准备中</h2>
+        <p id="overlay-msg">正在加载手部识别模型，请稍候…</p>
+        <p class="small">请用本站 HTTPS 打开，并允许摄像头权限。<br />模型来自 CDN，需能访问外网。</p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    /**
+     * 汉字绽放 HSK1 变体
+     * 指尖弹出汉字 + 拼音 + 英文，并用 speechSynthesis(zh-CN) 朗读
+     */
+
+    import {
+      FilesetResolver,
+      HandLandmarker,
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm";
+
+    // HSK1 五个字：对应五指（拇指→小指）；可用 ?chars=你,好,吗&title=第3课 覆盖
+    const DEFAULT_HSK_CHARS = [
+      { hanzi: "花", pinyin: "huā", en: "flower" },
+      { hanzi: "爱", pinyin: "ài", en: "love" },
+      { hanzi: "你", pinyin: "nǐ", en: "you" },
+      { hanzi: "好", pinyin: "hǎo", en: "good" },
+      { hanzi: "学", pinyin: "xué", en: "study" },
+    ];
+    const PINYIN_DICT = {
+      "花": ["huā", "flower"], "爱": ["ài", "love"], "你": ["nǐ", "you"],
+      "好": ["hǎo", "good"], "学": ["xué", "study"], "我": ["wǒ", "I / me"],
+      "中": ["zhōng", "middle / China"], "文": ["wén", "language"],
+      "大": ["dà", "big"], "人": ["rén", "person"], "口": ["kǒu", "mouth"],
+      "吗": ["ma", "question particle"], "很": ["hěn", "very"], "是": ["shì", "to be"],
+      "不": ["bù", "not"], "了": ["le", "aspect particle"], "们": ["men", "plural"],
+      "他": ["tā", "he"], "她": ["tā", "she"], "的": ["de", "possessive"],
+      "一": ["yī", "one"], "二": ["èr", "two"], "三": ["sān", "three"],
+      "四": ["sì", "four"], "五": ["wǔ", "five"], "六": ["liù", "six"],
+      "七": ["qī", "seven"], "八": ["bā", "eight"], "九": ["jiǔ", "nine"],
+      "十": ["shí", "ten"], "谢": ["xiè", "thanks"], "请": ["qǐng", "please"],
+      "见": ["jiàn", "see"], "再": ["zài", "again"], "叫": ["jiào", "to call"],
+      "名": ["míng", "name"], "字": ["zì", "character"], "认": ["rèn", "recognize"],
+      "识": ["shí", "know"], "朋": ["péng", "friend"], "友": ["yǒu", "friend"],
+      "老": ["lǎo", "old"], "师": ["shī", "teacher"], "同": ["tóng", "same"],
+      "家": ["jiā", "home"], "国": ["guó", "country"], "汉": ["hàn", "Chinese"],
+      "语": ["yǔ", "language"], "说": ["shuō", "speak"], "听": ["tīng", "listen"],
+      "看": ["kàn", "look"], "读": ["dú", "read"], "写": ["xiě", "write"],
+      "吃": ["chī", "eat"], "喝": ["hē", "drink"], "水": ["shuǐ", "water"],
+      "茶": ["chá", "tea"], "饭": ["fàn", "meal"], "天": ["tiān", "day"],
+      "年": ["nián", "year"], "月": ["yuè", "month"], "日": ["rì", "day"],
+      "今": ["jīn", "today"], "明": ["míng", "bright"], "昨": ["zuó", "yesterday"],
+      "上": ["shàng", "up"], "下": ["xià", "down"], "来": ["lái", "come"],
+      "去": ["qù", "go"], "回": ["huí", "return"], "在": ["zài", "at"],
+      "有": ["yǒu", "have"], "没": ["méi", "not have"], "多": ["duō", "many"],
+      "少": ["shǎo", "few"], "小": ["xiǎo", "small"], "高": ["gāo", "tall"],
+      "开": ["kāi", "open"], "关": ["guān", "close"], "心": ["xīn", "heart"],
+      "喜": ["xǐ", "like"], "欢": ["huān", "happy"], "对": ["duì", "correct"],
+      "起": ["qǐ", "rise"], "做": ["zuò", "do"], "工": ["gōng", "work"],
+      "作": ["zuò", "work"], "买": ["mǎi", "buy"], "卖": ["mài", "sell"],
+      "钱": ["qián", "money"], "块": ["kuài", "yuan"], "本": ["běn", "measure"],
+      "书": ["shū", "book"], "车": ["chē", "car"], "飞": ["fēi", "fly"],
+      "机": ["jī", "machine"], "电": ["diàn", "electric"], "话": ["huà", "speech"],
+      "脑": ["nǎo", "brain"], "电": ["diàn", "electric"],
+    };
+    function parseLessonChars(defaults) {
+      const params = new URLSearchParams(location.search);
+      const title = (params.get("title") || "").trim();
+      const raw = (params.get("chars") || "").trim();
+      let list = defaults.slice();
+      if (raw) {
+        const wanted = raw.split(/[,，\s]+/).map((s) => s.trim()).filter((s) => s.length >= 1);
+        if (wanted.length) {
+          list = wanted.map((h) => {
+            const ch = [...h][0]; // first code point
+            const hit = PINYIN_DICT[ch];
+            return { hanzi: ch, pinyin: hit ? hit[0] : "", en: hit ? hit[1] : "" };
+          });
+        }
+      }
+      // 五指需要 5 个：不足则循环补齐，多余取前 5
+      if (list.length === 0) list = defaults.slice();
+      while (list.length < 5) list.push(list[list.length % Math.max(1, list.length)] || defaults[0]);
+      list = list.slice(0, 5);
+      return { list, title, raw };
+    }
+    const __lesson = parseLessonChars(DEFAULT_HSK_CHARS);
+    const HSK_CHARS = __lesson.list;
+
+    const COLORS = [
+      ["#ff9ec4", "#ff6b9d"],
+      ["#e8a0ff", "#c77dff"],
+      ["#ffb347", "#ff8c69"],
+      ["#7ec8ff", "#5b9bd5"],
+      ["#a8e6cf", "#56c596"],
+    ];
+
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const hintEl = document.getElementById("hint");
+    (function applyLessonHint() {
+      const labels = HSK_CHARS.map((c) => c.hanzi).join(" / ");
+      if (__lesson.title) {
+        hintEl.textContent = "📖 " + __lesson.title + " · 张开手指，让汉字绽放（" + labels + "）";
+        document.title = __lesson.title + " · 汉字绽放";
+      } else if (__lesson.raw) {
+        hintEl.textContent = "📖 张开手指，让汉字绽放（" + labels + "）";
+      }
+    })();
+    const statusEl = document.getElementById("status");
+    const overlay = document.getElementById("overlay");
+    const overlayTitle = document.getElementById("overlay-title");
+    const overlayMsg = document.getElementById("overlay-msg");
+
+    const TIP_IDS = [4, 8, 12, 16, 20];
+    const WRIST_ID = 0;
+    const MIDDLE_MCP_ID = 9;
+    const SMOOTH = 0.28;
+    const MAX_HANDS = 2;
+    const SPEAK_COOLDOWN_MS = 2200; // 同一字朗读冷却，避免刷屏
+
+    let handLandmarker = null;
+    let lastVideoTime = -1;
+    let running = false;
+    const handStates = new Map();
+    /** 每个汉字最近一次朗读时间 */
+    const lastSpoken = Object.create(null);
+    let particles = [];
+
+    function showOverlay(title, msg) {
+      overlayTitle.textContent = title;
+      overlayMsg.innerHTML = msg;
+      overlay.classList.remove("hidden");
+    }
+    function hideOverlay() {
+      overlay.classList.add("hidden");
+    }
+    function setStatus(t) {
+      statusEl.textContent = t;
+    }
+
+    // ---------- 朗读 ----------
+    function speakChar(item) {
+      if (!window.speechSynthesis) return;
+      const now = Date.now();
+      if (lastSpoken[item.hanzi] && now - lastSpoken[item.hanzi] < SPEAK_COOLDOWN_MS) {
+        return;
+      }
+      lastSpoken[item.hanzi] = now;
+      try {
+        window.speechSynthesis.cancel(); // 清掉排队，避免重叠
+        const u = new SpeechSynthesisUtterance(item.hanzi);
+        u.lang = "zh-CN";
+        u.rate = 0.9;
+        u.pitch = 1.05;
+        // 优先选中文语音
+        const voices = window.speechSynthesis.getVoices();
+        const zh = voices.find(
+          (v) => v.lang === "zh-CN" || v.lang.startsWith("zh")
+        );
+        if (zh) u.voice = zh;
+        window.speechSynthesis.speak(u);
+      } catch (e) {
+        console.warn("朗读失败", e);
+      }
+    }
+
+    // 部分浏览器需等 voiceschanged
+    if (window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+
+    // ---------- 摄像头 ----------
+    async function startCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showOverlay(
+          "无法使用摄像头",
+          "当前浏览器不支持 getUserMedia。<br />请用 Chrome / Edge，并通过 <b>http://localhost</b> 打开本页。"
+        );
+        throw new Error("getUserMedia unsupported");
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+        video.srcObject = stream;
+        await video.play();
+        resizeCanvas();
+      } catch (err) {
+        const name = err && err.name ? err.name : "Error";
+        let reason = String(err.message || err);
+        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
+          reason =
+            "你拒绝了摄像头权限。<br />请点击地址栏左侧图标 → 摄像头 → <b>允许</b>，然后刷新。";
+        } else if (name === "NotFoundError") {
+          reason = "没有检测到摄像头设备。";
+        } else if (name === "NotReadableError") {
+          reason = "摄像头被其他程序占用，请先关闭微信/会议软件。";
+        } else if (name === "SecurityError") {
+          reason = "请用 <b>http://localhost:端口</b> 打开，不要用 file://。";
+        }
+        showOverlay("没有摄像头权限", reason);
+        throw err;
+      }
+    }
+
+    function resizeCanvas() {
+      const w = video.videoWidth || window.innerWidth;
+      const h = video.videoHeight || window.innerHeight;
+      const dw = window.innerWidth;
+      const dh = window.innerHeight;
+      canvas.width = dw;
+      canvas.height = dh;
+      canvas._map = computeCoverMap(w, h, dw, dh);
+    }
+
+    function computeCoverMap(vw, vh, cw, ch) {
+      const scale = Math.max(cw / vw, ch / vh);
+      const rw = vw * scale;
+      const rh = vh * scale;
+      return { scale, ox: (cw - rw) / 2, oy: (ch - rh) / 2, vw, vh };
+    }
+
+    function lmToCanvas(lm) {
+      const m = canvas._map;
+      if (!m) return { x: 0, y: 0 };
+      const vx = (1 - lm.x) * m.vw;
+      const vy = lm.y * m.vh;
+      return { x: m.ox + vx * m.scale, y: m.oy + vy * m.scale };
+    }
+
+    async function initHandLandmarker() {
+      setStatus("正在加载 MediaPipe 模型…");
+      const wasmPath =
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm";
+      const modelPath =
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+      try {
+        const vision = await FilesetResolver.forVisionTasks(wasmPath);
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
+          runningMode: "VIDEO",
+          numHands: MAX_HANDS,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.5,
+          minTrackingConfidence: 0.5,
+        });
+      } catch (e) {
+        console.warn("GPU 失败，回退 CPU", e);
+        const vision = await FilesetResolver.forVisionTasks(wasmPath);
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelPath, delegate: "CPU" },
+          runningMode: "VIDEO",
+          numHands: MAX_HANDS,
+        });
+      }
+    }
+
+    function calcOpenness(landmarks) {
+      const wrist = landmarks[WRIST_ID];
+      const mcp = landmarks[MIDDLE_MCP_ID];
+      const palm =
+        Math.hypot(wrist.x - mcp.x, wrist.y - mcp.y, (wrist.z || 0) - (mcp.z || 0)) ||
+        1e-6;
+      let sum = 0;
+      for (const id of TIP_IDS) {
+        const t = landmarks[id];
+        sum += Math.hypot(t.x - wrist.x, t.y - wrist.y, (t.z || 0) - (wrist.z || 0));
+      }
+      const raw = (sum / TIP_IDS.length / palm - 1.0) / 1.6;
+      return Math.max(0, Math.min(1, raw));
+    }
+
+    function ensureHandState(key) {
+      if (!handStates.has(key)) {
+        handStates.set(key, {
+          openness: 0,
+          chars: HSK_CHARS.map(() => ({
+            scale: 0,
+            rotation: (Math.random() - 0.5) * 0.4,
+            spoken: false,
+          })),
+        });
+      }
+      return handStates.get(key);
+    }
+
+    function spawnSparks(x, y, color, n) {
+      for (let i = 0; i < n; i++) {
+        particles.push({
+          x,
+          y,
+          vx: (Math.random() - 0.5) * 2,
+          vy: -0.5 - Math.random() * 1.5,
+          life: 1,
+          decay: 0.012 + Math.random() * 0.012,
+          size: 2 + Math.random() * 3,
+          color,
+        });
+      }
+    }
+
+    /** 在指尖画汉字 + 拼音 + 英文 */
+    function drawCharBloom(x, y, scale, rotation, item, colors) {
+      if (scale < 0.04) return;
+      const [c1, c2] = colors;
+      const s = scale;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation * (1 - s * 0.5)); // 张开时逐渐摆正
+
+      // 光晕底盘
+      ctx.shadowColor = c1;
+      ctx.shadowBlur = 22 * s;
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 48 * s);
+      glow.addColorStop(0, c1 + "55");
+      glow.addColorStop(0.6, c2 + "22");
+      glow.addColorStop(1, "transparent");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, 48 * s, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 汉字
+      ctx.shadowBlur = 16 * s;
+      ctx.shadowColor = c1;
+      ctx.fillStyle = "#fffef8";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `bold ${Math.round(42 * s)}px "Songti SC", "SimSun", "Noto Serif SC", serif`;
+      ctx.globalAlpha = Math.min(1, s * 1.2);
+      ctx.fillText(item.hanzi, 0, -4 * s);
+
+      // 拼音
+      ctx.shadowBlur = 0;
+      ctx.font = `${Math.round(13 * s)}px "PingFang SC", "Microsoft YaHei", sans-serif`;
+      ctx.fillStyle = c1;
+      ctx.globalAlpha = Math.min(1, s * 1.1);
+      ctx.fillText(item.pinyin, 0, 26 * s);
+
+      // 英文
+      ctx.font = `${Math.round(11 * s)}px "PingFang SC", "Segoe UI", sans-serif`;
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillText(item.en, 0, 40 * s);
+
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.03;
+        p.life -= p.decay;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+      if (particles.length > 180) particles.splice(0, particles.length - 180);
+    }
+
+    function drawParticles() {
+      for (const p of particles) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+    }
+
+    function loop() {
+      requestAnimationFrame(loop);
+      if (!running || !handLandmarker) return;
+      if (video.readyState < 2) return;
+
+      const now = performance.now();
+      if (video.currentTime !== lastVideoTime) {
+        lastVideoTime = video.currentTime;
+        let result = null;
+        try {
+          result = handLandmarker.detectForVideo(video, now);
+        } catch (e) {
+          console.warn(e);
+        }
+        renderFrame(result);
+      } else {
+        renderFrame(null);
+      }
+    }
+
+    function renderFrame(result) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const seen = new Set();
+      let activeChar = null;
+
+      if (result && result.landmarks && result.landmarks.length) {
+        result.landmarks.forEach((landmarks, hi) => {
+          const handedness =
+            (result.handednesses &&
+              result.handednesses[hi] &&
+              result.handednesses[hi][0] &&
+              result.handednesses[hi][0].categoryName) ||
+            `hand${hi}`;
+          const key = handedness + "_" + hi;
+          seen.add(key);
+
+          const rawOpen = calcOpenness(landmarks);
+          const state = ensureHandState(key);
+          state.openness += (rawOpen - state.openness) * SMOOTH;
+          const open = state.openness;
+
+          TIP_IDS.forEach((tid, fi) => {
+            const pt = lmToCanvas(landmarks[tid]);
+            const ch = state.chars[fi];
+            const item = HSK_CHARS[fi];
+            const target = open;
+            const lerp = open > ch.scale ? 0.11 : 0.2;
+            ch.scale += (target - ch.scale) * lerp;
+            ch.rotation *= 0.96;
+
+            drawCharBloom(pt.x, pt.y, ch.scale, ch.rotation, item, COLORS[fi]);
+
+            // 绽放越过阈值：朗读一次
+            if (open > 0.62 && ch.scale > 0.55) {
+              if (!ch.spoken) {
+                speakChar(item);
+                ch.spoken = true;
+                activeChar = item;
+              }
+              if (Math.random() < 0.06 * open) {
+                spawnSparks(pt.x, pt.y, COLORS[fi][0], 1);
+              }
+            }
+            // 握拳后重置，下次再张开可再读
+            if (open < 0.28) {
+              ch.spoken = false;
+            }
+          });
+        });
+
+        const openAvg =
+          [...handStates.values()].reduce((s, h) => s + h.openness, 0) /
+          Math.max(1, handStates.size);
+        if (activeChar) {
+          setStatus(`🔊 ${activeChar.hanzi} · ${activeChar.pinyin} · ${activeChar.en}`);
+        } else if (openAvg > 0.55) {
+          setStatus("汉字正在绽放 · 听发音");
+        } else if (openAvg < 0.25) {
+          setStatus("握拳收拢 · 再张开可再听");
+        } else {
+          setStatus("检测到手 · 张开五指认字");
+        }
+        hintEl.style.opacity = openAvg > 0.4 ? "0.35" : "1";
+      } else {
+        setStatus("把手放到镜头前，张开五指认 HSK1 字");
+        hintEl.style.opacity = "1";
+      }
+
+      for (const k of handStates.keys()) {
+        if (!seen.has(k)) {
+          const st = handStates.get(k);
+          st.openness *= 0.85;
+          st.chars.forEach((c) => {
+            c.scale *= 0.85;
+          });
+          if (st.openness < 0.02) handStates.delete(k);
+        }
+      }
+
+      updateParticles();
+      drawParticles();
+    }
+
+    async function main() {
+      try {
+        showOverlay(
+          "准备中",
+          "正在加载手部识别模型…<br />（需访问 jsDelivr 与 Google Storage CDN）"
+        );
+        await initHandLandmarker();
+        showOverlay("请求摄像头", "请在浏览器弹窗中点击「允许」。");
+        await startCamera();
+        hideOverlay();
+        running = true;
+        setStatus("张开手指，每个指尖一个汉字");
+        window.addEventListener("resize", resizeCanvas);
+        loop();
+      } catch (e) {
+        console.error(e);
+        if (overlay.classList.contains("hidden")) {
+          showOverlay(
+            "初始化失败",
+            "模型或摄像头启动失败。请确认能访问外网 CDN，并用 localhost 打开。<br /><span style='color:#999;font-size:12px'>" +
+              String(e.message || e) +
+              "</span>"
+          );
+        }
+        setStatus("启动失败");
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>

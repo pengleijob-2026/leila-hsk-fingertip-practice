@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>蕾姐中文 · 指尖练习（课后作业）</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      color: #fff4f8;
+      background:
+        radial-gradient(ellipse at 20% 10%, rgba(255, 120, 170, 0.25), transparent 45%),
+        radial-gradient(ellipse at 80% 0%, rgba(120, 160, 255, 0.2), transparent 40%),
+        radial-gradient(ellipse at 50% 100%, rgba(255, 180, 100, 0.12), transparent 50%),
+        #0a0a12;
+      padding: 32px 20px 48px;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 28px; }
+    header .badge {
+      display: inline-block;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      color: #ffb6d0;
+      border: 1px solid rgba(255, 182, 208, 0.35);
+      border-radius: 999px;
+      padding: 6px 14px;
+      background: rgba(255, 255, 255, 0.04);
+      margin-bottom: 14px;
+    }
+    h1 {
+      font-size: clamp(24px, 5vw, 34px);
+      font-weight: 700;
+      line-height: 1.35;
+      margin-bottom: 10px;
+    }
+    .tip {
+      font-size: 14px;
+      line-height: 1.7;
+      color: rgba(255, 228, 236, 0.78);
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid rgba(255, 192, 203, 0.22);
+      border-radius: 14px;
+      padding: 12px 16px;
+      margin: 18px 0 28px;
+    }
+    .cards {
+      display: grid;
+      gap: 14px;
+    }
+    a.card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      padding: 22px 20px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 192, 210, 0.28);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+      transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s;
+    }
+    a.card:hover, a.card:focus {
+      transform: translateY(-2px);
+      background: rgba(255, 170, 200, 0.14);
+      border-color: rgba(255, 192, 210, 0.55);
+      outline: none;
+    }
+    a.card .emoji { font-size: 28px; margin-bottom: 6px; }
+    a.card .name { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+    a.card .desc { font-size: 13px; color: rgba(255, 228, 236, 0.65); line-height: 1.5; }
+    section.teacher {
+      margin-top: 36px;
+      padding: 18px 18px 16px;
+      border-radius: 16px;
+      background: rgba(80, 120, 200, 0.1);
+      border: 1px solid rgba(126, 180, 255, 0.28);
+    }
+    section.teacher h2 {
+      font-size: 16px;
+      color: #9ec8ff;
+      margin-bottom: 10px;
+    }
+    section.teacher p {
+      font-size: 14px;
+      line-height: 1.7;
+      color: rgba(230, 240, 255, 0.85);
+    }
+    section.teacher code {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.35);
+      font-size: 12px;
+      word-break: break-all;
+      color: #d6e8ff;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    footer {
+      margin-top: 36px;
+      text-align: center;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="badge">蕾姐中文 · 课后练习</div>
+      <h1>蕾姐中文 · 指尖练习（课后作业）</h1>
+    </header>
+
+    <p class="tip">
+      手机/电脑 Chrome 或 Safari；第一次需允许摄像头；也可点页面里「不用摄像头」用鼠标练笔顺。
+    </p>
+
+    <div class="cards">
+      <a class="card" href="./flower.html">
+        <div class="emoji">🌸</div>
+        <div class="name">指尖开花</div>
+        <div class="desc">张开手指，让花在指尖绽放；握拳收拢。适合热身与玩手势。</div>
+      </a>
+      <a class="card" href="./hsk-chars.html">
+        <div class="emoji">📖</div>
+        <div class="name">汉字绽放</div>
+        <div class="desc">五指各一个汉字，张开看拼音/英文并听朗读。可用老师发的专属字表链接。</div>
+      </a>
+      <a class="card" href="./hsk-stroke.html">
+        <div class="emoji">✍️</div>
+        <div class="name">笔顺描红</div>
+        <div class="desc">看笔顺演示、听朗读；描红练习可用鼠标/触屏，或摄像头食指当笔。</div>
+      </a>
+    </div>
+
+    <section class="teacher">
+      <h2>老师发作业</h2>
+      <p>
+        每课可发专属链接，在网址后面加上本课汉字与标题即可，例如：
+      </p>
+      <code>hsk-stroke.html?chars=你,好,吗,我,很&amp;title=第3课</code>
+      <p style="margin-top:10px">
+        参数说明：<b>chars</b>=逗号分隔汉字；<b>title</b>=可选，显示在页面提示里。汉字绽放页同样支持这两个参数。
+      </p>
+    </section>
+
+    <footer>蕾姐中文 · 指尖练习 · 需联网加载 CDN 模型</footer>
+  </div>
+</body>
+</html>

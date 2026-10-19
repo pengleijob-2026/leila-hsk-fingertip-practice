@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>指尖开花 · 让花在指尖绽放</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #0a0a0f;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      color: #fff;
+    }
+    #wrap {
+      position: relative;
+      width: 100vw; height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      background: #0a0a0f;
+    }
+    /* 镜像摄像头画面 */
+    #video {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      filter: brightness(0.55) contrast(1.05);
+      z-index: 1;
+    }
+    #canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+    #hint {
+      position: absolute;
+      top: 20px; left: 20px;
+      z-index: 10;
+      padding: 10px 16px;
+      background: rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 192, 203, 0.35);
+      border-radius: 12px;
+      font-size: 15px;
+      letter-spacing: 0.05em;
+      color: #ffe4ec;
+      box-shadow: 0 0 20px rgba(255, 150, 180, 0.15);
+    }
+    #hint .sub {
+      display: block;
+      margin-top: 4px;
+      font-size: 12px;
+      color: rgba(255, 228, 236, 0.65);
+    }
+    #status {
+      position: absolute;
+      bottom: 20px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      padding: 8px 14px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 20px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+    #nav {
+      position: absolute;
+      top: 20px; right: 20px;
+      z-index: 10;
+      font-size: 13px;
+    }
+    #nav a {
+      color: #ffc0cb;
+      text-decoration: none;
+      padding: 8px 12px;
+      background: rgba(0,0,0,0.45);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 192, 203, 0.3);
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(8, 8, 14, 0.92);
+      text-align: center;
+      padding: 32px;
+    }
+    #overlay.show { display: flex; }
+    #overlay h2 {
+      font-size: 22px;
+      margin-bottom: 12px;
+      color: #ffb6c1;
+    }
+    #overlay p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: rgba(255, 255, 255, 0.8);
+      max-width: 420px;
+    }
+    #loading {
+      position: absolute;
+      inset: 0;
+      z-index: 15;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0f;
+      gap: 16px;
+    }
+    #loading.hide { display: none; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid rgba(255, 182, 193, 0.2);
+      border-top-color: #ffb6c1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="canvas"></canvas>
+    <div id="hint">
+      张开手指，让真花一层层绽放
+      <span class="sub">握拳时花会慢慢收拢 · 最多识别 2 只手</span>
+    </div>
+    <div id="nav" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:55vw">
+      <a href="./index.html">首页</a>
+      <a href="./hsk-chars.html">汉字绽放</a>
+      <a href="./hsk-stroke.html">笔顺描红</a>
+    </div>
+    <div id="status">正在准备…</div>
+    <div id="loading">
+      <div class="spinner"></div>
+      <div>正在加载手部识别模型…</div>
+    </div>
+    <div id="overlay">
+      <h2>无法使用摄像头</h2>
+      <p id="overlay-msg">请允许浏览器使用摄像头。请用本站 HTTPS 链接打开（手机/电脑 Chrome 或 Safari）。</p>
+    </div>
+  </div>
+
+  <!-- MediaPipe Tasks Vision（CDN） -->
+  <script type="module">
+    /**
+     * 指尖开花 · 单文件实现
+     * - getUserMedia 镜像摄像头
+     * - MediaPipe HandLandmarker 识别最多 2 只手
+     * - 张开度 = 五指尖到手腕平均距离 / 手掌大小，平滑后驱动花朵开合
+     * - Canvas 2D 画花瓣 + 飘落粒子
+     */
+
+    import {
+      FilesetResolver,
+      HandLandmarker,
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm";
+
+    // ---------- DOM ----------
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const statusEl = document.getElementById("status");
+    const loadingEl = document.getElementById("loading");
+    const overlay = document.getElementById("overlay");
+    const overlayMsg = document.getElementById("overlay-msg");
+
+    // 指尖关键点编号：拇指、食指、中指、无名指、小指
+    const TIP_IDS = [4, 8, 12, 16, 20];
+    const WRIST = 0;
+    const MIDDLE_MCP = 9; // 用来估算手掌大小
+
+    // 每根手指一种樱花粉→淡紫渐变色
+    const FINGER_COLORS = [
+      { petal: ["#ffb7c5", "#e85a7a"], center: "#ffd36b" }, // 拇指 玫瑰粉
+      { petal: ["#ffc0cb", "#d94f7a"], center: "#ffe08a" }, // 食指
+      { petal: ["#ff9eb5", "#c43d6e"], center: "#ffd36b" }, // 中指 深玫
+      { petal: ["#e8b4f8", "#b56bd4"], center: "#ffe08a" }, // 无名 淡紫
+      { petal: ["#ffd1dc", "#e07090"], center: "#ffd36b" }, // 小指 浅粉
+    ];
+
+    // ---------- 状态 ----------
+    let handLandmarker = null;
+    let lastVideoTime = -1;
+    let running = false;
+    // 每只手的平滑张开度与粒子
+    const handStates = new Map(); // handIndex -> { openness, flowers[], particles[] }
+
+    // ---------- 工具 ----------
+    function dist(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.hypot(dx, dy);
+    }
+
+    /** 计算张开度 0~1：五指尖到手腕平均距离 / 手掌大小 */
+    function calcOpenness(landmarks) {
+      const wrist = landmarks[WRIST];
+      const palmSize = dist(wrist, landmarks[MIDDLE_MCP]) || 0.01;
+      let sum = 0;
+      for (const id of TIP_IDS) {
+        sum += dist(wrist, landmarks[id]);
+      }
+      const avg = sum / TIP_IDS.length;
+      // 经验归一化：握拳约 0.8~1.2 倍掌长，张开约 2.0~2.8 倍
+      const raw = (avg / palmSize - 1.0) / 1.6;
+      return Math.max(0, Math.min(1, raw));
+    }
+
+    function smooth(prev, next, alpha = 0.35) {
+      return prev * (1 - alpha) + next * alpha;
+    }
+
+    /**
+     * 镜像后的屏幕坐标（对齐 video 的 object-fit: cover）
+     * MediaPipe 归一化 [0,1]；video CSS 已 scaleX(-1)，故 x 用 (1 - lm.x)
+     */
+    function coverMap(vw, vh, cw, ch) {
+      const scale = Math.max(cw / vw, ch / vh);
+      const ox = (cw - vw * scale) / 2;
+      const oy = (ch - vh * scale) / 2;
+      return { scale, ox, oy };
+    }
+    function toScreen(lm, w, h) {
+      const vw = video.videoWidth || w;
+      const vh = video.videoHeight || h;
+      const m = coverMap(vw, vh, w, h);
+      const vx = (1 - lm.x) * vw;
+      const vy = lm.y * vh;
+      return { x: m.ox + vx * m.scale, y: m.oy + vy * m.scale };
+    }
+
+    // ---------- 花朵与粒子 ----------
+    function makeFlower(colorIdx) {
+      return {
+        scale: 0,
+        targetScale: 0,
+        bloom: 0,          // 0=花苞 1=完全绽放（比 scale 更慢，有仪式感）
+        rotation: Math.random() * Math.PI * 2,
+        spin: 0.0015 + Math.random() * 0.003, // 慢转，更像真花
+        petalCount: 8,
+        colorIdx,
+        glow: 0,
+        phase: Math.random() * Math.PI * 2,
+      };
+    }
+
+    function spawnPetalParticle(x, y, colorIdx) {
+      const c = FINGER_COLORS[colorIdx].petal[0];
+      return {
+        x, y,
+        vx: (Math.random() - 0.5) * 1.2,
+        vy: 0.4 + Math.random() * 1.2,
+        life: 1,
+        decay: 0.008 + Math.random() * 0.01,
+        size: 3 + Math.random() * 5,
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 0.1,
+        color: c,
+      };
+    }
+
+    /**
+     * 画一朵「真花绽放」：三层花瓣从花苞向外一层层打开（不是平面椭圆贴片）。
+     * bloom 0→花苞合拢；bloom 1→完全绽放。
+     */
+    function drawPetalLayer(ctx, r, count, openSpread, lean, colors, alpha, tipRound) {
+      for (let i = 0; i < count; i++) {
+        const angle = (i / count) * Math.PI * 2 + flowerPhaseOffset;
+        ctx.save();
+        ctx.rotate(angle);
+        // lean：花苞时花瓣竖起靠近中心；绽放时向外倒
+        ctx.rotate(lean);
+        ctx.globalAlpha = alpha;
+        const len = r * (0.85 + tipRound * 0.15);
+        const wid = r * (0.22 + openSpread * 0.12);
+        const cy = -len * (0.35 + openSpread * 0.25);
+        const grad = ctx.createRadialGradient(0, cy * 0.6, 0, 0, cy, len * 0.85);
+        grad.addColorStop(0, colors.petal[0]);
+        grad.addColorStop(0.55, colors.petal[1]);
+        grad.addColorStop(1, colors.petal[1] + "00");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        // 花瓣轮廓：根部窄、中段宽、尖端圆润（更像玫瑰瓣）
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(wid * 0.9, cy * 0.35, wid, cy * 0.75, 0, cy - len * 0.15);
+        ctx.bezierCurveTo(-wid, cy * 0.75, -wid * 0.9, cy * 0.35, 0, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+    let flowerPhaseOffset = 0; // 每层错开用临时变量，由 drawFlower 设置
+
+    function drawFlower(ctx, x, y, flower, openness) {
+      const s = flower.scale;
+      if (s < 0.02) return;
+
+      const colors = FINGER_COLORS[flower.colorIdx];
+      const bloom = Math.max(0, Math.min(1, flower.bloom ?? s));
+      // 比原来大约一倍
+      const baseR = 42 + openness * 58;
+      const r = baseR * s;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(flower.rotation);
+
+      ctx.shadowColor = colors.petal[0];
+      ctx.shadowBlur = 16 + bloom * 22 * flower.glow;
+
+      // 萼片/花苞底（绿意，绽放后变淡）
+      const budAlpha = Math.max(0, 0.55 - bloom * 0.55);
+      if (budAlpha > 0.05) {
+        ctx.save();
+        ctx.globalAlpha = budAlpha;
+        ctx.fillStyle = "#3a7a4a";
+        for (let i = 0; i < 5; i++) {
+          ctx.save();
+          ctx.rotate((i / 5) * Math.PI * 2);
+          ctx.beginPath();
+          ctx.ellipse(0, -r * 0.28 * (1 - bloom * 0.4), r * 0.12, r * 0.32, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+
+      // 四层玫瑰：外瓣先开、内瓣后开；延迟拉大 → 更有层次
+      const layers = [
+        { count: 8, delay: 0.00, size: 1.08, lean0: -0.62, lean1: 0.14 },
+        { count: 8, delay: 0.16, size: 0.90, lean0: -0.78, lean1: 0.06 },
+        { count: 7, delay: 0.32, size: 0.70, lean0: -0.95, lean1: -0.02 },
+        { count: 6, delay: 0.48, size: 0.48, lean0: -1.12, lean1: -0.08 },
+      ];
+      for (let li = 0; li < layers.length; li++) {
+        const L = layers[li];
+        const local = Math.max(0, Math.min(1, (bloom - L.delay) / (1 - L.delay)));
+        // smoothstep
+        const e = local * local * (3 - 2 * local);
+        const lean = L.lean0 + (L.lean1 - L.lean0) * e;
+        const openSpread = e;
+        flowerPhaseOffset = flower.phase + li * 0.35;
+        drawPetalLayer(ctx, r * L.size, L.count, openSpread, lean, colors, 0.72 + e * 0.28, e);
+      }
+
+      // 花心（金黄）
+      const cr = r * (0.16 + bloom * 0.08);
+      const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, cr * 1.4);
+      cg.addColorStop(0, "#fff8dc");
+      cg.addColorStop(0.4, "#ffd36b");
+      cg.addColorStop(1, colors.center);
+      ctx.globalAlpha = 0.5 + bloom * 0.5;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = cg;
+      ctx.beginPath();
+      ctx.arc(0, 0, cr, 0, Math.PI * 2);
+      ctx.fill();
+      // 花蕊小点
+      if (bloom > 0.35) {
+        ctx.fillStyle = "#ffe9a8";
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2 + flower.phase;
+          ctx.beginPath();
+          ctx.arc(Math.cos(a) * cr * 0.55, Math.sin(a) * cr * 0.55, 1.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    function drawParticle(ctx, p) {
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life) * 0.85;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.shadowColor = p.color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.size * 0.55, p.size, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // ---------- 摄像头 ----------
+    async function setupCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("当前环境不支持摄像头（请用 Chrome 打开 http://localhost 页面）");
+      }
+      // file:// 协议通常拿不到摄像头
+      if (location.protocol === "file:") {
+        throw new Error("请勿直接双击打开 HTML。请用本地服务器：python -m http.server 8000，然后访问 http://localhost:8000");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      return new Promise((resolve) => {
+        if (video.readyState >= 2) resolve();
+        else video.onloadeddata = () => resolve();
+      });
+    }
+
+    // ---------- MediaPipe ----------
+    async function setupHandLandmarker() {
+      const wasmPath = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm";
+      const modelPath =
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+      const common = {
+        runningMode: "VIDEO",
+        numHands: 2,
+        minHandDetectionConfidence: 0.6,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      };
+      try {
+        const vision = await FilesetResolver.forVisionTasks(wasmPath);
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
+          ...common,
+        });
+      } catch (e) {
+        // GPU 不可用时回退 CPU
+        console.warn("GPU 初始化失败，回退 CPU", e);
+        const vision = await FilesetResolver.forVisionTasks(wasmPath);
+        handLandmarker = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: modelPath, delegate: "CPU" },
+          ...common,
+        });
+      }
+    }
+
+    // ---------- 主循环 ----------
+    function resize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+      }
+    }
+
+    function ensureHandState(idx) {
+      if (!handStates.has(idx)) {
+        handStates.set(idx, {
+          openness: 0,
+          flowers: TIP_IDS.map((_, i) => makeFlower(i)),
+          particles: [],
+        });
+      }
+      return handStates.get(idx);
+    }
+
+    function detectAndUpdate() {
+      if (!handLandmarker || video.readyState < 2) return;
+      const now = performance.now();
+      if (video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+
+      const result = handLandmarker.detectForVideo(video, now);
+      const w = canvas.width;
+      const h = canvas.height;
+      const seen = new Set();
+
+      if (result.landmarks && result.landmarks.length) {
+        result.landmarks.forEach((landmarks, idx) => {
+          seen.add(idx);
+          const state = ensureHandState(idx);
+          const raw = calcOpenness(landmarks);
+          state.openness = smooth(state.openness, raw, 0.3);
+
+          // 更新每朵花的目标缩放
+          state.flowers.forEach((f, i) => {
+            f.targetScale = state.openness;
+            // scale 稍快跟上手势；bloom 更慢，一层层打开更有仪式感
+            f.scale = smooth(f.scale, f.targetScale, 0.08);
+            f.bloom = smooth(f.bloom ?? 0, f.targetScale, 0.028); // 更慢
+            f.rotation += f.spin * (0.25 + state.openness * 0.5);
+            f.glow = smooth(f.glow, state.openness, 0.15);
+
+            // 花开时偶尔飘出花瓣粒子
+            if (state.openness > 0.45 && Math.random() < 0.08 * state.openness) {
+              const tip = toScreen(landmarks[TIP_IDS[i]], w, h);
+              state.particles.push(spawnPetalParticle(tip.x, tip.y, i));
+            }
+          });
+
+          // 暂存指尖屏幕坐标供绘制
+          state._tips = TIP_IDS.map((id) => toScreen(landmarks[id], w, h));
+        });
+        statusEl.textContent = `已识别 ${result.landmarks.length} 只手 · 张开度 ${[...handStates.values()].map(s => s.openness.toFixed(2)).join(" / ")}`;
+      } else {
+        statusEl.textContent = "请将手放在镜头前 30~60 厘米，张开五指";
+      }
+
+      // 未再检测到的手：缓慢收拢
+      for (const [idx, state] of handStates) {
+        if (!seen.has(idx)) {
+          state.openness = smooth(state.openness, 0, 0.15);
+          state.flowers.forEach((f) => {
+            f.targetScale = 0;
+            f.scale = smooth(f.scale, 0, 0.12);
+          });
+          if (state.openness < 0.02 && state.flowers.every((f) => f.scale < 0.02) && state.particles.length === 0) {
+            handStates.delete(idx);
+          }
+        }
+      }
+    }
+
+    function render() {
+      resize();
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      detectAndUpdate();
+
+      for (const state of handStates.values()) {
+        // 画花
+        if (state._tips) {
+          state.flowers.forEach((f, i) => {
+            const tip = state._tips[i];
+            if (tip) drawFlower(ctx, tip.x, tip.y, f, state.openness);
+          });
+        }
+        // 更新并画粒子
+        state.particles = state.particles.filter((p) => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.03; // 重力
+          p.rot += p.spin;
+          p.life -= p.decay;
+          if (p.life > 0) drawParticle(ctx, p);
+          return p.life > 0;
+        });
+        // 限制粒子数量防卡顿
+        if (state.particles.length > 80) {
+          state.particles.splice(0, state.particles.length - 80);
+        }
+      }
+    }
+
+    function loop() {
+      if (!running) return;
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    // ---------- 启动 ----------
+    async function main() {
+      try {
+        statusEl.textContent = "正在请求摄像头权限…";
+        await setupCamera();
+        statusEl.textContent = "正在加载 MediaPipe 模型（需联网）…";
+        await setupHandLandmarker();
+        loadingEl.classList.add("hide");
+        running = true;
+        statusEl.textContent = "准备就绪 · 张开手指，让真花一层层绽放";
+        requestAnimationFrame(loop);
+      } catch (err) {
+        console.error(err);
+        loadingEl.classList.add("hide");
+        overlay.classList.add("show");
+        const msg = (err && err.message) ? err.message : String(err);
+        if (/NotAllowed|Permission|denied/i.test(msg) || err.name === "NotAllowedError") {
+          overlayMsg.textContent = "你拒绝了摄像头权限。请点击地址栏左侧图标 → 摄像头 → 允许，然后刷新页面。";
+        } else if (/NotFound|DevicesNotFound/i.test(msg) || err.name === "NotFoundError") {
+          overlayMsg.textContent = "未检测到摄像头设备。请确认电脑有摄像头，并关闭微信、腾讯会议等占用摄像头的软件。";
+        } else {
+          overlayMsg.textContent = msg;
+        }
+      }
+    }
+
+    window.addEventListener("resize", resize);
+    main();
+  </script>
+</body>
+</html>
